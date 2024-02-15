@@ -1,0 +1,21 @@
+{
+  "ModId": "Unreal.ObjectDumpToJson",
+  "ModName": "Unreal Object Dumper",
+  "ModAuthor": "Rirurin",
+  "ModVersion": "1.0.0",
+  "ModDescription": "Description",
+  "ModDll": "Unreal.ObjectDumpToJson.dll",
+  "ModIcon": "Preview.png",
+  "ModR2RManagedDll32": "x86/Unreal.ObjectDumpToJson.dll",
+  "ModR2RManagedDll64": "x64/Unreal.ObjectDumpToJson.dll",
+  "ModNativeDll32": "",
+  "ModNativeDll64": "",
+  "IsLibrary": false,
+  "ReleaseMetadataFileName": "Unreal.ObjectDumpToJson.ReleaseMetadata.json",
+  "PluginData": {},
+  "IsUniversalMod": true,
+  "ModDependencies": [ "reloaded.sharedlib.hooks", "Reloaded.Memory.SigScan.ReloadedII" ],
+  "OptionalDependencies": [],
+  "SupportedAppId": [],
+  "ProjectUrl": ""
+}
