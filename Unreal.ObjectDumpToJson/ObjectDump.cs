@@ -51,7 +51,7 @@ namespace Unreal.ObjectDumpToJson
                     if (!export.classes.TryGetValue(type_name, out _)) ExportClass(target_obj);
                 }
                 string json_out = JsonConvert.SerializeObject(export, Formatting.Indented); // get classes dictionary 
-                Directory.CreateDirectory(file_path);
+                Directory.CreateDirectory(Path.GetDirectoryName(file_path));
                 using (StreamWriter out_file = new StreamWriter(file_path))
                     out_file.WriteLine(json_out);
             }
