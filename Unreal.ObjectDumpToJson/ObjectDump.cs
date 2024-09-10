@@ -134,6 +134,7 @@ namespace Unreal.ObjectDumpToJson
             string type_name = _context.g_namePool->GetString(type->name.pool_location);
             int offset = curr_field->offset_internal;
             int size = curr_field->element_size;
+            //_context._logger.WriteLine($"{type_name} {field_name} @ {size}");
             UnrealFieldType type_data;
             switch (type_name)
             {
@@ -189,6 +190,7 @@ namespace Unreal.ObjectDumpToJson
                 case "SoftClassProperty": // TSoftClassPtr<UObject>
                     UClass* class_data = (type_name == "ClassProperty" || type_name == "SoftClassProperty")
                         ? ((FClassProperty*)curr_field)->meta : ((FObjectProperty*)curr_field)->prop_class;
+                    _context._logger.WriteLine($"Got ObjectProperty {_context.g_namePool->GetString(((FField*)curr_field)->name_private.pool_location)} @ 0x{(nint)curr_field:X}");
                     if (class_data != null)
                     {
                         string inner_class_name = _context.g_namePool->GetString(((UObjectBase*)class_data)->NamePrivate.pool_location);

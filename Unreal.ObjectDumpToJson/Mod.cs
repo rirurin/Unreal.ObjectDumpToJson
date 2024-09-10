@@ -54,15 +54,9 @@ namespace Unreal.ObjectDumpToJson
             _owner = context.Owner;
             _configuration = context.Configuration;
             _modConfig = context.ModConfig;
-
-
-            // For more information about this template, please see
-            // https://reloaded-project.github.io/Reloaded-II/ModTemplate/
-
-            // If you want to implement e.g. unload support in your mod,
-            // and some other neat features, override the methods in ModBase.
-
-            // TODO: Implement some mod logic
+#if DEBUG
+            Debugger.Launch();
+#endif
 
             _modLoader = context.ModLoader;
             _hooks = context.Hooks;
