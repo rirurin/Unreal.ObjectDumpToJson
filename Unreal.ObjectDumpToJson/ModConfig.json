@@ -1,9 +1,9 @@
 {
   "ModId": "Unreal.ObjectDumpToJson",
-  "ModName": "Unreal Object Dumper",
+  "ModName": "Unreal Object Dumper [BASE]",
   "ModAuthor": "Rirurin",
-  "ModVersion": "1.0.0",
-  "ModDescription": "Description",
+  "ModVersion": "2.0.0",
+  "ModDescription": "A tool to dump Unreal Engine's runtime reflection information into a JSON that can be imported into Ghidra",
   "ModDll": "Unreal.ObjectDumpToJson.dll",
   "ModIcon": "Preview.png",
   "ModR2RManagedDll32": "x86/Unreal.ObjectDumpToJson.dll",
@@ -14,7 +14,12 @@
   "ReleaseMetadataFileName": "Unreal.ObjectDumpToJson.ReleaseMetadata.json",
   "PluginData": {},
   "IsUniversalMod": true,
-  "ModDependencies": [ "reloaded.sharedlib.hooks", "Reloaded.Memory.SigScan.ReloadedII" ],
+  "ModDependencies": [
+    "reloaded.sharedlib.hooks", 
+    "Reloaded.Memory.SigScan.ReloadedII",
+    "SharedScans.Reloaded",
+    "UE.Toolkit.Reloaded"
+  ],
   "OptionalDependencies": [],
   "SupportedAppId": [],
   "ProjectUrl": ""

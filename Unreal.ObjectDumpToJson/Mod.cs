@@ -2,49 +2,29 @@
 using Reloaded.Memory.SigScan.ReloadedII.Interfaces;
 using Reloaded.Mod.Interfaces;
 using System.Diagnostics;
+using p3rpc.commonmodutils;
+using Reloaded.Memory;
+using Reloaded.Mod.Interfaces.Internal;
+using RyoTune.Reloaded;
+using SharedScans.Interfaces;
+using UE.Toolkit.Core.Types.Unreal.Factories;
+using UE.Toolkit.Interfaces;
 using Unreal.ObjectDumpToJson.Configuration;
 using Unreal.ObjectDumpToJson.Template;
 
 namespace Unreal.ObjectDumpToJson
 {
-    /// <summary>
-    /// Your mod logic goes here.
-    /// </summary>
-    public class Mod : ModBase // <= Do not Remove.
+    public class Mod : ModBase
     {
-        /// <summary>
-        /// Provides access to the mod loader API.
-        /// </summary>
         private readonly IModLoader _modLoader;
-
-        /// <summary>
-        /// Provides access to the Reloaded.Hooks API.
-        /// </summary>
-        /// <remarks>This is null if you remove dependency on Reloaded.SharedLib.Hooks in your mod.</remarks>
         private readonly IReloadedHooks? _hooks;
-
-        /// <summary>
-        /// Provides access to the Reloaded logger.
-        /// </summary>
         private readonly ILogger _logger;
-
-        /// <summary>
-        /// Entry point into the mod, instance that created this class.
-        /// </summary>
         private readonly IMod _owner;
-
-        /// <summary>
-        /// Provides access to this mod's configuration.
-        /// </summary>
         private Config _configuration;
-
-        /// <summary>
-        /// The configuration of the currently executing mod.
-        /// </summary>
         private readonly IModConfig _modConfig;
 
-        private Context _context;
-        private ObjectDump _objectDump;
+        private DumperContext _context;
+        private readonly ModuleRuntime<DumperContext> _runtime;
 
         public Mod(ModContext context)
         {
@@ -58,28 +38,53 @@ namespace Unreal.ObjectDumpToJson
             Debugger.Launch();
 #endif
 
-            _modLoader = context.ModLoader;
-            _hooks = context.Hooks;
-            _logger = context.Logger;
-            _owner = context.Owner;
-            _configuration = context.Configuration;
-            _modConfig = context.ModConfig;
-            var baseAddress = Process.GetCurrentProcess().MainModule.BaseAddress;
-            var programName = Path.GetFileNameWithoutExtension(Process.GetCurrentProcess().MainModule.FileName);
-            _modLoader.GetController<IStartupScanner>().TryGetTarget(out var startupScanner);
-            if (startupScanner == null || _hooks == null) throw new Exception("Missing dependencies : startup scanner, hooks");
-            Utils utils = new(startupScanner, _logger, baseAddress);
-            _context = new(baseAddress, _configuration, _logger, startupScanner, _hooks, _modLoader.GetDirectoryForModId(_modConfig.ModId), utils, programName);
-            _objectDump = new(_context);
+            var process = Process.GetCurrentProcess();
+            var programName = Path.GetFileNameWithoutExtension(process.MainModule!.FileName);
+            if (process?.MainModule == null) throw new Exception($"[{_modConfig.ModName}] Process is null");
+            var baseAddress = process.MainModule.BaseAddress;
+            if (_hooks == null) throw new Exception($"[{_modConfig.ModName}] Could not get controller for Reloaded hooks");
+            var logColor = System.Drawing.Color.PaleTurquoise;
+            Project.Initialize(_modConfig, _modLoader, _logger, logColor, true);
+            Log.LogLevel = _configuration.LogLevel;
+            var startupScanner = Utils.GetDependency<IStartupScanner>(_modLoader, _modConfig.ModName, "Reloaded Startup Scanner");
+            var utils = Utils.Create(_modLoader, startupScanner, _logger, _hooks, baseAddress, _modConfig.ModName, logColor);
+
+            var sharedScans = utils.GetDependencyEx<ISharedScans>("Shared Scans");
+            var toolkitObjects = utils.GetDependencyEx<IUnrealObjects>("Object Interface (UE Toolkit)");
+            var toolkitMemory = utils.GetDependencyEx<IUnrealMemory>("Memory Interface (UE Toolkit)");
+            var toolkitStrings = utils.GetDependencyEx<IUnrealStrings>("String Interface (UE Toolkit)");
+            var toolkitState = utils.GetDependencyEx<IUnrealState>("Unreal State (UE Toolkit)");
+            var toolkitFactory = utils.GetDependencyEx<IUnrealFactory>("Factory (UE Toolkit)");
+            var toolkitSpawning = utils.GetDependencyEx<IUnrealSpawning>("Spawning (UE Toolkit)");
+            var toolkitClasses = utils.GetDependencyEx<IUnrealClasses>("Classes (UE Toolkit)");
+
+            _context = new(
+                baseAddress, _configuration, _logger, startupScanner, _hooks,
+                _modLoader.GetDirectoryForModId(_modConfig.ModId), utils,
+                new Memory(), sharedScans, toolkitStrings, toolkitObjects, toolkitMemory, 
+                toolkitState, toolkitFactory, toolkitSpawning, toolkitClasses, programName);
+            _runtime = new(_context);
+            _runtime.AddModule<Dumper>();
+            _runtime.RegisterModules();
+            
+            _modLoader.OnModLoaderInitialized += OnLoaderInit;
+            _modLoader.ModLoading += OnModLoading;
         }
+        
+        private void OnLoaderInit()
+        {
+            _modLoader.OnModLoaderInitialized -= OnLoaderInit;
+            _modLoader.ModLoading -= OnModLoading;
+        }
+
+        private void OnModLoading(IModV1 mod, IModConfigV1 conf) {}
 
         #region Standard Overrides
         public override void ConfigurationUpdated(Config configuration)
         {
-            // Apply settings from configuration.
-            // ... your code here.
             _configuration = configuration;
-            _logger.WriteLine($"[{_modConfig.ModId}] Config Updated: Applying");
+            Log.Information("Config Updated: Applying");
+            _runtime.UpdateConfiguration(configuration);
         }
         #endregion
 

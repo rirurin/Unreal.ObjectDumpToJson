@@ -5,6 +5,8 @@ VisualStudioVersion = 17.8.34330.188
 MinimumVisualStudioVersion = 10.0.40219.1
 Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "Unreal.ObjectDumpToJson", "Unreal.ObjectDumpToJson\Unreal.ObjectDumpToJson.csproj", "{B9D7666A-2585-440B-918A-69C2CCD6DA2F}"
 EndProject
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "UE.Toolkit.Core", "E:\trip2\UE.Toolkit\UE.Toolkit.Core\UE.Toolkit.Core.csproj", "{94699236-EA45-4CD1-A774-3AFDB682D9B4}"
+EndProject
 Global
 	GlobalSection(SolutionConfigurationPlatforms) = preSolution
 		Debug|Any CPU = Debug|Any CPU
@@ -15,6 +17,10 @@ Global
 		{B9D7666A-2585-440B-918A-69C2CCD6DA2F}.Debug|Any CPU.Build.0 = Debug|Any CPU
 		{B9D7666A-2585-440B-918A-69C2CCD6DA2F}.Release|Any CPU.ActiveCfg = Release|Any CPU
 		{B9D7666A-2585-440B-918A-69C2CCD6DA2F}.Release|Any CPU.Build.0 = Release|Any CPU
+		{94699236-EA45-4CD1-A774-3AFDB682D9B4}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
+		{94699236-EA45-4CD1-A774-3AFDB682D9B4}.Debug|Any CPU.Build.0 = Debug|Any CPU
+		{94699236-EA45-4CD1-A774-3AFDB682D9B4}.Release|Any CPU.ActiveCfg = Release|Any CPU
+		{94699236-EA45-4CD1-A774-3AFDB682D9B4}.Release|Any CPU.Build.0 = Release|Any CPU
 	EndGlobalSection
 	GlobalSection(SolutionProperties) = preSolution
 		HideSolutionNode = FALSE
