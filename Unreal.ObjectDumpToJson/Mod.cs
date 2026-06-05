@@ -25,6 +25,12 @@ namespace Unreal.ObjectDumpToJson
 
         private DumperContext _context;
         private readonly ModuleRuntime<DumperContext> _runtime;
+        
+#if DEBUG
+        private const bool ASYNC_LOG = false;
+#else
+        private const bool ASYNC_LOG = true;
+#endif
 
         public Mod(ModContext context)
         {
@@ -44,7 +50,7 @@ namespace Unreal.ObjectDumpToJson
             var baseAddress = process.MainModule.BaseAddress;
             if (_hooks == null) throw new Exception($"[{_modConfig.ModName}] Could not get controller for Reloaded hooks");
             var logColor = System.Drawing.Color.PaleTurquoise;
-            Project.Initialize(_modConfig, _modLoader, _logger, logColor, true);
+            Project.Initialize(_modConfig, _modLoader, _logger, logColor, ASYNC_LOG);
             Log.LogLevel = _configuration.LogLevel;
             var startupScanner = Utils.GetDependency<IStartupScanner>(_modLoader, _modConfig.ModName, "Reloaded Startup Scanner");
             var utils = Utils.Create(_modLoader, startupScanner, _logger, _hooks, baseAddress, _modConfig.ModName, logColor);

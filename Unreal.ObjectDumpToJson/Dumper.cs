@@ -127,19 +127,23 @@ namespace Unreal.ObjectDumpToJson
             return new UnrealFieldEnumType(byteEnumOut.Name, byteEnumOut);
         }
 
+        // UGenericFunctionLibrary_C::CompareIntegers - Clair Obscur: Expedition 33
+        // The enum EComparisonMethod is not registered in the type reflection system
         private UnrealFieldType CreateBytePropertyType(IFProperty property)
-            => _context._toolkitFactory.CreateFByteProperty(property.Ptr).Enum switch
-            {
-                null => new UnrealFieldType(property.ClassPrivate.Name),
-                var v => CreateEnumProperty(v)
-            };
+        {
+            var asEnum = _context._toolkitFactory.CreateFByteProperty(property.Ptr).Enum;
+            return asEnum != null && asEnum.Ptr != nint.Zero
+                ? CreateEnumProperty(asEnum)
+                : new UnrealFieldType(property.ClassPrivate.Name);
+        }
 
         private UnrealFieldType CreateEnumPropertyType(IFProperty property)
-            => _context._toolkitFactory.CreateFEnumProperty(property.Ptr).Enum switch
-            {
-                null => new UnrealFieldType(property.ClassPrivate.Name),
-                var v => CreateEnumProperty(v, property.ElementSize)
-            };
+        {
+            var asEnum = _context._toolkitFactory.CreateFEnumProperty(property.Ptr).Enum;
+            return asEnum != null && asEnum.Ptr != nint.Zero
+                ? CreateEnumProperty(asEnum, property.ElementSize)
+                : new UnrealFieldType(property.ClassPrivate.Name);
+        }
         
         private UnrealFieldType CreateStructPropertyType(IFProperty property)
         {
@@ -157,7 +161,9 @@ namespace Unreal.ObjectDumpToJson
                     .MetaClass,
                 _ => _context._toolkitFactory.CreateFObjectProperty(property.Ptr).PropertyClass
             };
-            if (classData == null) return new UnrealFieldType(property.ClassPrivate.Name);
+            // UValidationHelpersFunctionLibrary_C::CheckIsValid - Clair Obscur: Expedition 33
+            // The object parameter ValidatorContext has no type
+            if (classData == null || classData.Ptr == nint.Zero) return new UnrealFieldType(property.ClassPrivate.Name);
             ToExport.Classes.TryGetValue(classData.NamePrivate.ToString(), out var target);
             return new UnrealFieldClassType(property.ClassPrivate.Name, target ?? ExportClass(classData.ClassDefaultObject!));
         }
@@ -216,13 +222,14 @@ namespace Unreal.ObjectDumpToJson
 
         private UnrealFunction ExportFunction(IUFunction func)
         {
-            // Log.Information($"ExportFunction: {func.NamePrivate.ToString()}");
+            // Log.Information($"\tExportFunction: {func.NamePrivate.ToString()}");
             UnrealField? Return = null;
             List<UnrealField> FnParams = [];
             foreach (var Field in func.ChildProperties)
             {
-                // Log.Information($"\t{Field.ClassPrivate.Name} {Field.NamePrivate}");
                 var Property = _context._toolkitFactory.CreateFProperty(Field.Ptr);
+                if ((Property.PropertyFlags & EPropertyFlags.CPF_Parm) == 0) continue;
+                // Log.Information($"\t\t{Field.ClassPrivate.Name} {Field.NamePrivate}");
                 var FieldCnv = GetField(Property);
                 if ((Property.PropertyFlags & EPropertyFlags.CPF_ReturnParm) != 0) Return = FieldCnv;
                 else FnParams.Add(FieldCnv);
