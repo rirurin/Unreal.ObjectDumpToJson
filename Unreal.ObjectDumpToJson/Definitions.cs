@@ -1,4 +1,5 @@
-﻿using System.Text.Json.Serialization;
+﻿using System.Text.Json;
+using System.Text.Json.Serialization;
 using UE.Toolkit.Core.Types.Unreal.UE5_4_4;
 
 namespace Unreal.ObjectDumpToJson
@@ -26,6 +27,15 @@ namespace Unreal.ObjectDumpToJson
         public EPropertyFlags Flags { get; set; } = flags;
     }
     
+    [JsonPolymorphic(TypeDiscriminatorPropertyName = "__type")]
+    [JsonDerivedType(typeof(UnrealFieldArrayType))]
+    [JsonDerivedType(typeof(UnrealFieldMapType))]
+    [JsonDerivedType(typeof(UnrealFieldStructType))]
+    [JsonDerivedType(typeof(UnrealFieldClassType))]
+    [JsonDerivedType(typeof(UnrealFieldBoolType))]
+    [JsonDerivedType(typeof(UnrealFieldEnumType))]
+    [JsonDerivedType(typeof(UnrealFieldDelegateType))]
+    [JsonDerivedType(typeof(UnrealFieldOptionalType))]
     public class UnrealFieldType(string name) : UnrealPropertyBase(name)
     {
         public virtual string GetTypeName() => Name;
@@ -74,6 +84,11 @@ namespace Unreal.ObjectDumpToJson
     public class UnrealFieldDelegateType(string name, UnrealFunction uDelegate) : UnrealFieldType(name)
     {
         public UnrealFunction Delegate { get; set; } = uDelegate;
+    }
+    
+    public class UnrealFieldOptionalType(string name, UnrealField inner) : UnrealFieldType(name)
+    {
+        public string ValueName { get; private set; } = inner.Type.GetTypeName();
     }
     
     public class UnrealStruct : UnrealPropertyBase

@@ -1,18 +1,11 @@
-/* ###
- * IP: GHIDRA
- *
- * Licensed under the Apache License, Version 2.0 (the "License");
- * you may not use this file except in compliance with the License.
- * You may obtain a copy of the License at
- * 
- *      http://www.apache.org/licenses/LICENSE-2.0
- * 
- * Unless required by applicable law or agreed to in writing, software
- * distributed under the License is distributed on an "AS IS" BASIS,
- * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
- * See the License for the specific language governing permissions and
- * limitations under the License.
- */
+//Label types and functions exposed to Unreal's type reflection system
+//@author Rirurin
+//@category Unreal Engine
+//@keybinding
+//@menupath
+//@toolbar
+
+import ghidra.app.script.GhidraScript;
 
 import java.io.BufferedReader;
 import java.io.File;
@@ -20,9 +13,12 @@ import java.io.FileReader;
 import java.io.IOException;
 import java.lang.reflect.Type;
 import java.util.ArrayDeque;
+import java.util.ArrayList;
+import java.util.Arrays;
 import java.util.HashMap;
 import java.util.LinkedList;
 import java.util.List;
+import java.util.Map;
 import java.util.Queue;
 import java.util.Set;
 import java.util.function.Supplier;
@@ -40,7 +36,6 @@ import com.google.gson.JsonObject;
 import com.google.gson.JsonParseException;
 import com.google.gson.stream.JsonReader;
 
-import ghidra.app.script.GhidraScript;
 import ghidra.program.model.address.Address;
 import ghidra.program.model.data.ArrayDataType;
 import ghidra.program.model.data.ByteDataType;
@@ -55,7 +50,7 @@ import ghidra.program.model.data.FloatDataType;
 import ghidra.program.model.data.IntegerDataType;
 import ghidra.program.model.data.InvalidDataTypeException;
 import ghidra.program.model.data.LongLongDataType;
-import ghidra.program.model.data.Pointer64DataType;
+import ghidra.program.model.data.PointerDataType;
 import ghidra.program.model.data.ShortDataType;
 import ghidra.program.model.data.StringDataType;
 import ghidra.program.model.data.Structure;
@@ -92,13 +87,18 @@ public class UnrealGen extends GhidraScript {
 	
 	private UnrealStructDeserializeHelper structDeser;
 	private Queue<UnrealArrayField> PostRegisterCreateArrays;
+	private Queue<UnrealWeakObjectField> PostRegisterCreateWeakObjects;
+	private Queue<UnrealSoftObjectField> PostRegisterCreateSoftObjects;
+	private Queue<UnrealSetField> PostRegisterCreateSets;
+	private Queue<UnrealMapField> PostRegisterCreateMaps;
+	private Queue<UnrealOptionalField> PostRegisterCreateOptionals;
 	
 	public class Utilities {
 		private DataType AddDataTypeModifier(DataType curr, String token) {
 			DataType res;
 			switch (token.charAt(0)) {
 				case '*':
-					res = new Pointer64DataType(curr);
+					res = new PointerDataType(curr);
 					break;
 				case '[':
 					Pattern p = Pattern.compile("\\d+");
@@ -357,7 +357,6 @@ public class UnrealGen extends GhidraScript {
 					String adj_name = func.Name.replace(" ", "_"); // Ghidra doesn't allow function/symbol names with spaces
 					try { currentProgram.getSymbolTable().createLabel(func.ExecFuncAddr, "exec" + adj_name, new_class, SourceType.ANALYSIS); } 
 					catch (InvalidInputException e) {
-						// what the fuck is "ｿ0､0・・､0・_\u0000B\u0000e\u0000a\u0000t\u0000_\u0000_" supposed to be hifi rush
 						currentProgram.getSymbolTable().createLabel(func.ExecFuncAddr, "exec" + GetProperName() + "_func" + i, new_class, SourceType.ANALYSIS);
 					}
 					i++;
@@ -507,6 +506,7 @@ public class UnrealGen extends GhidraScript {
 			struct.replaceAtOffset(Offset, GetType(), GetType().getLength(), Name, null); 
 		}
 	}
+	
 	public UnrealField UnrealFieldFactory(JsonObject field, JsonObject type) {
 		 String type_name = type.get("Name").getAsString();
 		 //println(type_name);
@@ -559,6 +559,7 @@ public class UnrealGen extends GhidraScript {
 		 	case "MulticastSparseDelegateProperty":
 		 		new_field = new UnrealDelegateField(type.get("Delegate").getAsJsonObject()); 
 		 		break;
+		 	case "OptionalProperty": new_field = new UnrealOptionalField(type.get("ValueName").getAsString()); break;
 	 		default:
 	 			// probably an enum
 	 			if (LoadedEnums.get(type_name) != null) { new_field = new UnrealEnumField(type_name); break; }
@@ -686,18 +687,103 @@ public class UnrealGen extends GhidraScript {
 		}
 		public DataType GetType() { return utility.GetDataType(GetTypeName()); }
 	}
+	
+	/*
 	public class UnrealWeakObjectField extends UnrealObjectRefBase {
 		public UnrealWeakObjectField(String Name) { super(Name); }
 		public String GetTemplateName() { return "TWeakObjectPtr"; }
 	}
+	*/
+	
+	public class UnrealWeakObjectField extends UnrealField {
+		public String ValueName;
+		public String DTMName;
+		public String GetTypeName() { return "TWeakObjectPtr<" + DTMName + ", FWeakObjectPtr>"; }
+		public UnrealWeakObjectField(String Name) {
+			ValueName = Name;
+			PostRegisterCreateWeakObjects.add(this);
+		}
+		
+		private void SetDTMName() {
+			UnrealStruct tgt_struct = LoadedClasses.get(ValueName);
+			if (tgt_struct == null) tgt_struct = LoadedStructs.get(ValueName);
+			if (tgt_struct != null) DTMName = tgt_struct.struct_data.getName();
+			else {
+				if (LoadedEnums.get(ValueName) != null) { // is enum
+					DTMName = ValueName; // otherwise it's an enum, which uses the normal value name	
+				} else { // unknown type
+					DTMName = "void";
+				} 
+			}
+		}
+		
+		private void CreateWeakObjectType() {
+			SetDTMName();
+			//println("Create Weak Object " + GetTypeName());
+			unrealTypes.GetBuiltInOrCreate(GetTypeName(), name -> {
+				StructureDataType new_struct = new StructureDataType(BuiltInTypes, name, 8);
+				utility.AddToStruct(new_struct, "Value", 0, utility.GetDataType("FWeakObjectPtr"));
+				currentProgram.getDataTypeManager().addDataType(new_struct, null);
+				return new_struct;
+			});
+		}
+		
+		public DataType GetType() {
+			return utility.GetDataType(GetTypeName()); 
+		}
+	}
+	
 	public class UnrealLazyObjectField extends UnrealObjectRefBase {
 		public UnrealLazyObjectField(String Name) { super(Name); }
 		public String GetTemplateName() { return "TLazyObjectPtr"; }
 	}
+	
+	/*
 	public class UnrealSoftObjectField extends UnrealObjectRefBase {
 		public UnrealSoftObjectField(String Name) { super(Name); }
 		public String GetTemplateName() { return "TSoftObjectPtr"; }
 	}
+	*/
+	
+	public class UnrealSoftObjectField extends UnrealField {
+		public String ValueName;
+		public String DTMName;
+		public String GetTypeName() { return "TSoftObjectPtr<" + DTMName + ">"; }
+		public UnrealSoftObjectField(String Name) {
+			ValueName = Name;
+			PostRegisterCreateSoftObjects.add(this);
+		}
+		
+		private void SetDTMName() {
+			UnrealStruct tgt_struct = LoadedClasses.get(ValueName);
+			if (tgt_struct == null) tgt_struct = LoadedStructs.get(ValueName);
+			if (tgt_struct != null) DTMName = tgt_struct.struct_data.getName();
+			else {
+				if (LoadedEnums.get(ValueName) != null) { // is enum
+					DTMName = ValueName; // otherwise it's an enum, which uses the normal value name	
+				} else { // unknown type
+					DTMName = "void";
+				} 
+			}
+		}
+		
+		private void CreateSoftObjectType() {
+			SetDTMName();
+			//println("Create Soft Object " + GetTypeName());
+			unrealTypes.GetBuiltInOrCreate(GetTypeName(), name -> {
+				StructureDataType new_struct = new StructureDataType(BuiltInTypes, name, 8);
+				utility.AddToStruct(new_struct, "Value", 0, utility.GetDataType("FWeakObjectPtr"));
+				currentProgram.getDataTypeManager().addDataType(new_struct, null);
+				return new_struct;
+			});
+		}
+		
+		public DataType GetType() {
+			return utility.GetDataType(GetTypeName()); 
+		}
+	}
+	
+	
 	public class UnrealInterfaceField extends UnrealObjectRefBase {
 		public UnrealInterfaceField(String Name) { super(Name); }
 		public String GetTemplateName() { return "TScriptInterface"; }
@@ -716,15 +802,55 @@ public class UnrealGen extends GhidraScript {
 		}
 		
 		private void SetDTMName() {
-			UnrealStruct tgt_struct = LoadedClasses.get(ValueName);
-			if (tgt_struct == null) tgt_struct = LoadedStructs.get(ValueName);
-			if (tgt_struct != null) DTMName = tgt_struct.struct_data.getName();
-			else {
-				if (LoadedEnums.get(ValueName) != null) { // is enum
-					DTMName = ValueName; // otherwise it's an enum, which uses the normal value name	
-				} else { // unknown type
-					DTMName = "void";
-				} 
+			switch (ValueName) {
+		 		case "Int8Property":
+		 		case "ByteProperty":
+		 			DTMName = "byte";
+		 			break;
+		 		case "Int16Property":
+		 			DTMName = "short";
+		 			break;
+		 		case "IntProperty":
+		 			DTMName = "int";
+		 			break;
+		 		case "Int64Property":
+		 			DTMName = "longlong";
+		 			break;
+		 		case "UInt16Property":
+		 			DTMName = "ushort";
+		 			break;
+		 		case "UInt32Property":
+		 			DTMName = "uint";
+		 			break;
+		 		case "UInt64Property":
+		 			DTMName = "ulonglong";
+		 			break;
+		 		case "FloatProperty":
+		 			DTMName = "float";
+		 			break;
+		 		case "DoubleProperty":
+		 			DTMName = "double";
+		 			break;
+		 		case "NameProperty":
+		 			DTMName = "FName";
+		 			break;
+		 		case "StrProperty":
+		 			DTMName = "FString";
+		 			break;
+		 		case "TextProperty":
+		 			DTMName = "FText";
+		 			break;
+		 		default:
+					UnrealStruct tgt_struct = LoadedClasses.get(ValueName);
+					if (tgt_struct == null) tgt_struct = LoadedStructs.get(ValueName);
+					if (tgt_struct != null) DTMName = tgt_struct.struct_data.getName();
+					else {
+						if (LoadedEnums.get(ValueName) != null) { // is enum
+							DTMName = ValueName; // otherwise it's an enum, which uses the normal value name	
+						} else { // unknown type
+							DTMName = "void";
+						} 
+					}
 			}
 		}
 		
@@ -732,9 +858,9 @@ public class UnrealGen extends GhidraScript {
 			// Create TArray type once all classes and structs are defined
 			// First field is pointer to value type, next two fields are count and limit
 			SetDTMName();
-			println("Create Array " + GetTypeName());
+			//println("Create Array " + GetTypeName());
 			unrealTypes.GetUserTypeOrCreate(GetTypeName(), name -> {
-				StructureDataType new_arr = new StructureDataType(UserTypes, GetTypeName(), 16);
+				StructureDataType new_arr = new StructureDataType(BuiltInTypes, GetTypeName(), 16);
 				utility.AddToStruct(new_arr, "Entries", 0, utility.GetDataType(DTMName + "*"));
 				utility.AddToStruct(new_arr, "ArrayNum", 8, utility.GetDataType("int"));
 				utility.AddToStruct(new_arr, "ArrayMax", 12, utility.GetDataType("int"));
@@ -764,20 +890,123 @@ public class UnrealGen extends GhidraScript {
 	public class UnrealMapField extends UnrealField {
 		public String KeyName;
 		public String ValueName;
-		public String GetTypeName() { return "TMap<" + KeyName + ", " + ValueName + ">"; }
+		public String KeyDTMName;
+		public String ValueDTMName;
+		public String GetTypeName() { return "TMap<" + KeyDTMName + ", " + ValueDTMName + ">"; }
 		public UnrealMapField(String KeyName, String ValueName) {
 			this.KeyName = KeyName;
 			this.ValueName = ValueName;
+			PostRegisterCreateMaps.add(this);
+		}
+		
+		private String GetDTMName(String typeName) {
+			switch (typeName) {
+		 		case "Int8Property":
+		 		case "ByteProperty":
+		 			return "byte";
+		 		case "Int16Property":
+		 			return "short";
+		 		case "IntProperty":
+		 			return "int";
+		 		case "Int64Property":
+		 			return "longlong";
+		 		case "UInt16Property":
+		 			return "ushort";
+		 		case "UInt32Property":
+		 			return "uint";
+		 		case "UInt64Property":
+		 			return "ulonglong";
+		 		case "FloatProperty":
+		 			return "float";
+		 		case "DoubleProperty":
+		 			return "double";
+		 		case "NameProperty":
+		 			return "FName";
+		 		case "StrProperty":
+		 			return "FString";
+		 		case "TextProperty":
+		 			return "FText";
+		 		default:
+					String DTMName = "";
+					UnrealStruct tgt_struct = LoadedClasses.get(typeName);
+					if (tgt_struct == null) tgt_struct = LoadedStructs.get(typeName);
+					if (tgt_struct != null) DTMName = tgt_struct.struct_data.getName();
+					else {
+						if (LoadedEnums.get(typeName) != null) { // is enum
+							DTMName = typeName; // otherwise it's an enum, which uses the normal value name	
+						} else { // unknown type
+							DTMName = "void";
+						} 
+					}
+					return DTMName;
+			}
+		}
+		
+		private void SetDTMName() {
+			KeyDTMName = GetDTMName(KeyName);
+			ValueDTMName = GetDTMName(ValueName);
+		}
+		
+		private void CreateMapType() {
+			// Create TArray type once all classes and structs are defined
+			// First field is pointer to value type, next two fields are count and limit
+			SetDTMName();
+			println("Create Map " + GetTypeName());
+			
+			unrealTypes.GetUserTypeOrCreate("TMapElementAccessor<" + KeyDTMName + ", " + ValueDTMName + ">", name -> {
+				/*
+				var KeyType = utility.GetDataType(KeyDTMName);
+				var ValueType = utility.GetDataType(ValueDTMName);
+				
+				var KeyMask = KeyType.getAlignment() - 1;
+				var ValueOffset = KeyType.getLength();
+				ValueOffset += (KeyType.getAlignment() - (KeyType.getLength() & KeyMask)) & KeyMask;
+				
+				var ValueMask = ValueType.getAlignment() - 1;
+				var NextOffset = ValueOffset + ValueType.getLength();
+				NextOffset += (ValueType.getAlignment() - (NextOffset & ValueMask)) & ValueMask;
+				
+				StructureDataType new_arr = new StructureDataType(BuiltInTypes, name, NextOffset + 8);
+				utility.AddToStruct(new_arr, "Key", 0, KeyType);
+				utility.AddToStruct(new_arr, "Value", ValueOffset, utility.GetDataType("int"));
+				utility.AddToStruct(new_arr, "NextId", NextOffset, utility.GetDataType("int"));
+				utility.AddToStruct(new_arr, "HashIndex", NextOffset + 4, utility.GetDataType("int"));
+				currentProgram.getDataTypeManager().addDataType(new_arr, null);
+				return new_arr;
+				*/
+				// TODO
+				StructureDataType new_arr = new StructureDataType(BuiltInTypes, name, 0);
+				currentProgram.getDataTypeManager().addDataType(new_arr, null);
+				return new_arr;
+			});
+			
+			unrealTypes.GetUserTypeOrCreate("TArray<TMapElementAccessor<" + KeyDTMName + ", " + ValueDTMName + ">>", name -> {
+				StructureDataType new_arr = new StructureDataType(BuiltInTypes, name, 16);
+				utility.AddToStruct(new_arr, "Entries", 0, utility.GetDataType("TMapElementAccessor<" + KeyDTMName + ", " + ValueDTMName + ">*"));
+				utility.AddToStruct(new_arr, "ArrayNum", 8, utility.GetDataType("int"));
+				utility.AddToStruct(new_arr, "ArrayMax", 12, utility.GetDataType("int"));
+				currentProgram.getDataTypeManager().addDataType(new_arr, null);
+				return new_arr;
+			});
 			
 			unrealTypes.GetUserTypeOrCreate(GetTypeName(), name -> {
-				DataType og_type = currentProgram.getDataTypeManager().getDataType(BuiltInTypes, "TMap");
-				TypedefDataType typedef = new TypedefDataType(UserTypes, GetTypeName(), og_type); 
-				currentProgram.getDataTypeManager().addDataType(typedef, null);
-				return typedef;
+				StructureDataType new_arr = new StructureDataType(BuiltInTypes, name, 0x50);
+				utility.AddToStruct(new_arr, "Items", 0, utility.GetDataType("TArray<TMapElementAccessor<" + KeyDTMName + ", " + ValueDTMName + ">>"));
+				utility.AddToStruct(new_arr, "InlineAllocFlags", 0x10, utility.GetDataType("byte[16]"));
+				utility.AddToStruct(new_arr, "ArrayAllocFlags", 0x20, utility.GetDataType("TArray<void>"));
+				utility.AddToStruct(new_arr, "FirstFreeIndex", 0x30, utility.GetDataType("int"));
+				utility.AddToStruct(new_arr, "NumFreeIndices", 0x34, utility.GetDataType("int"));
+				utility.AddToStruct(new_arr, "FirstHashIndex", 0x38, utility.GetDataType("int"));
+				utility.AddToStruct(new_arr, "Hashes", 0x40, utility.GetDataType("int*"));
+				utility.AddToStruct(new_arr, "HashSize", 0x48, utility.GetDataType("int"));
+				currentProgram.getDataTypeManager().addDataType(new_arr, null);
+				return new_arr;
 			});
 		}
+		
 		public DataType GetType() { return utility.GetDataType(GetTypeName()); }
 	}
+	
 	public class UnrealEnumField extends UnrealField {
 		public String EnumName;
 		// Enum Name is stored in UnrealField.Name
@@ -786,6 +1015,7 @@ public class UnrealGen extends GhidraScript {
 		}
 		public DataType GetType() { return utility.GetDataType(EnumName); }
 	}
+	
 	public class UnrealDelegateField extends UnrealField {
 		public JsonObject Function;
 		public UnrealDelegateField(JsonObject Function) {
@@ -794,6 +1024,87 @@ public class UnrealGen extends GhidraScript {
 		// TODO
 		public DataType GetType() { return utility.GetDataType("byte"); }
 	}
+	
+	public class UnrealOptionalField extends UnrealField {
+		public String ValueName;
+		public String DTMName;
+		public String GetTypeName() { return "TOptional<" + DTMName + ">"; }
+		public UnrealOptionalField(String Name) {
+			ValueName = Name;
+			PostRegisterCreateOptionals.add(this);
+		}
+		
+		private void SetDTMName() {
+			switch (ValueName) {
+		 		case "Int8Property":
+		 		case "ByteProperty":
+		 			DTMName = "byte";
+		 			break;
+		 		case "Int16Property":
+		 			DTMName = "short";
+		 			break;
+		 		case "IntProperty":
+		 			DTMName = "int";
+		 			break;
+		 		case "Int64Property":
+		 			DTMName = "longlong";
+		 			break;
+		 		case "UInt16Property":
+		 			DTMName = "ushort";
+		 			break;
+		 		case "UInt32Property":
+		 			DTMName = "uint";
+		 			break;
+		 		case "UInt64Property":
+		 			DTMName = "ulonglong";
+		 			break;
+		 		case "FloatProperty":
+		 			DTMName = "float";
+		 			break;
+		 		case "DoubleProperty":
+		 			DTMName = "double";
+		 			break;
+		 		case "NameProperty":
+		 			DTMName = "FName";
+		 			break;
+		 		case "StrProperty":
+		 			DTMName = "FString";
+		 			break;
+		 		case "TextProperty":
+		 			DTMName = "FText";
+		 			break;
+		 		default:
+					UnrealStruct tgt_struct = LoadedClasses.get(ValueName);
+					if (tgt_struct == null) tgt_struct = LoadedStructs.get(ValueName);
+					if (tgt_struct != null) DTMName = tgt_struct.struct_data.getName();
+					else {
+						if (LoadedEnums.get(ValueName) != null) { // is enum
+							DTMName = ValueName; // otherwise it's an enum, which uses the normal value name	
+						} else { // unknown type
+							DTMName = "void";
+						} 
+					}
+			}
+		}
+		
+		private void CreateOptionalType() {
+			// Create TOptional type once all classes and structs are defined
+			// First field is the value type, next field is a boolean to store optionality
+			SetDTMName();
+			//println("Create Optional " + GetTypeName());
+			unrealTypes.GetUserTypeOrCreate(GetTypeName(), name -> {
+				var dtm = utility.GetDataType(DTMName);
+				StructureDataType new_arr = new StructureDataType(BuiltInTypes, GetTypeName(), dtm.getLength());
+				utility.AddToStruct(new_arr, "Value", 0, dtm);
+				currentProgram.getDataTypeManager().addDataType(new_arr, null);
+				return new_arr;
+			});
+		}
+		public DataType GetType() {
+			return utility.GetDataType(GetTypeName()); 
+		}
+	}
+	
 	public class UnrealEnumEntry {
 		public long Value;
 		public String Name;
@@ -896,7 +1207,7 @@ public class UnrealGen extends GhidraScript {
 			Set<String> keys = structs.keySet();
 			for (var key : keys) {
 				UnrealStruct new_struct = gson.fromJson(structs.get(key), UnrealStruct.class);
-				println("Created struct " + new_struct.Name + ", size " + new_struct.Size);
+				println("Created struct " + new_struct.Name + ", size " + new_struct.Size);	
 				LoadedStructs.put(new_struct.Name, new_struct);
 			}
 			println("Created " + keys.size() + " structs");
@@ -921,10 +1232,11 @@ public class UnrealGen extends GhidraScript {
 			if (!json.isJsonObject()) throw new JsonParseException("Incorrect JSON format (should be object)");
 			JsonObject obj = json.getAsJsonObject();
 			// Step 1: Import and create enums
-			DeserializeEnums(obj.get("enums").getAsJsonObject());
+			DeserializeEnums(obj.get("Enums").getAsJsonObject());
+			
 			// Step 2: Import classes and structs - deserialize struct and class data
-			DeserializeClasses(obj.get("classes").getAsJsonObject());
-			DeserializeStructs(obj.get("structs").getAsJsonObject());
+			DeserializeClasses(obj.get("Classes").getAsJsonObject());
+			DeserializeStructs(obj.get("Structs").getAsJsonObject());
 			
 			// Step 3: Create DTM objects (all structs and enums)
 			LoadedStructs.forEach((name, data) -> AddObjectToDTM(data));
@@ -932,6 +1244,21 @@ public class UnrealGen extends GhidraScript {
 			
 			while (!PostRegisterCreateArrays.isEmpty()) {
 				PostRegisterCreateArrays.poll().CreateArrayType();
+			}
+			while (!PostRegisterCreateWeakObjects.isEmpty()) {
+				PostRegisterCreateWeakObjects.poll().CreateWeakObjectType();
+			}
+			while (!PostRegisterCreateSoftObjects.isEmpty()) {
+				PostRegisterCreateSoftObjects.poll().CreateSoftObjectType();
+			}
+			while (!PostRegisterCreateSets.isEmpty()) {
+				PostRegisterCreateSets.poll();
+			}
+			while (!PostRegisterCreateMaps.isEmpty()) {
+				PostRegisterCreateMaps.poll().CreateMapType();
+			}
+			while (!PostRegisterCreateOptionals.isEmpty()) {
+				PostRegisterCreateOptionals.poll().CreateOptionalType();
 			}
 			
 			// Step 4: Add field information for each DTM object (done in a different pass to object init so we have all objects in DTM)
@@ -967,9 +1294,45 @@ public class UnrealGen extends GhidraScript {
 		LoadedEnums   = new HashMap<>();
 		
 		PostRegisterCreateArrays = new ArrayDeque<>();
+		PostRegisterCreateWeakObjects = new ArrayDeque<>();
+		PostRegisterCreateSoftObjects = new ArrayDeque<>();
+		PostRegisterCreateSets = new ArrayDeque<>();
+		PostRegisterCreateMaps = new ArrayDeque<>();
+		PostRegisterCreateOptionals = new ArrayDeque<>();
 		
-		// Make types
-		unrealTypes.GetBuiltInOrCreate("TArray", name -> {
+		unrealTypes.GetBuiltInOrCreate("FReferenceControllerBase", name -> {
+			StructureDataType new_struct = new StructureDataType(BuiltInTypes, name, 16);
+			utility.AddToStruct(new_struct, "vtable", 0, utility.GetDataType("void*"));
+			utility.AddToStruct(new_struct, "SharedReferenceCount", 8, utility.GetDataType("int"));
+			utility.AddToStruct(new_struct, "WeakReferenceCount", 12, utility.GetDataType("int"));
+			currentProgram.getDataTypeManager().addDataType(new_struct, null);
+			return new_struct;
+		});
+		
+		unrealTypes.GetBuiltInOrCreate("FSharedReferencer<1>", name -> {
+			StructureDataType new_struct = new StructureDataType(BuiltInTypes, name, 8);
+			utility.AddToStruct(new_struct, "ReferenceController", 0, utility.GetDataType("FReferenceControllerBase*"));
+			currentProgram.getDataTypeManager().addDataType(new_struct, null);
+			return new_struct;
+		});
+		
+		unrealTypes.GetBuiltInOrCreate("TSharedRef<void, 1>", name -> {
+			StructureDataType new_struct = new StructureDataType(BuiltInTypes, name, 16);
+			utility.AddToStruct(new_struct, "Object", 0, utility.GetDataType("void*"));
+			utility.AddToStruct(new_struct, "SharedReferenceCount", 8, utility.GetDataType("FSharedReferencer<1>"));
+			currentProgram.getDataTypeManager().addDataType(new_struct, null);
+			return new_struct;
+		});
+		
+		unrealTypes.GetBuiltInOrCreate("TRefCountPtr<void>", name -> {
+			StructureDataType new_struct = new StructureDataType(BuiltInTypes, name, 8);
+			utility.AddToStruct(new_struct, "Object", 0, utility.GetDataType("void*"));
+			currentProgram.getDataTypeManager().addDataType(new_struct, null);
+			return new_struct;
+		});
+		
+		
+		unrealTypes.GetBuiltInOrCreate("TArray<void>", name -> {
 			StructureDataType new_struct = new StructureDataType(BuiltInTypes, name, 16);
 			utility.AddToStruct(new_struct, "Entries", 0, utility.GetDataType("void*"));
 			utility.AddToStruct(new_struct, "ArrayNum", 8, utility.GetDataType("int"));
@@ -977,8 +1340,10 @@ public class UnrealGen extends GhidraScript {
 			currentProgram.getDataTypeManager().addDataType(new_struct, null);
 			return new_struct;
 		});
+		
 		unrealTypes.GetBuiltInOrCreate("TSet", 0x50);
 		unrealTypes.GetBuiltInOrCreate("TMap", 0x50);
+		
 		
 		unrealTypes.GetBuiltInOrCreate("FName", name -> {
 			StructureDataType new_struct = new StructureDataType(BuiltInTypes, name, 8);
@@ -987,13 +1352,114 @@ public class UnrealGen extends GhidraScript {
 			currentProgram.getDataTypeManager().addDataType(new_struct, null);
 			return new_struct;
 		});
-		unrealTypes.GetBuiltInOrCreate("FString", 0x10);
-		unrealTypes.GetBuiltInOrCreate("FText", 0x18);
+		unrealTypes.GetBuiltInOrCreate("FString", name -> {
+			StructureDataType new_struct = new StructureDataType(BuiltInTypes, name, 16);
+			utility.AddToStruct(new_struct, "Entries", 0, utility.GetDataType("char*"));
+			utility.AddToStruct(new_struct, "ArrayNum", 8, utility.GetDataType("int"));
+			utility.AddToStruct(new_struct, "ArrayMax", 12, utility.GetDataType("int"));
+			currentProgram.getDataTypeManager().addDataType(new_struct, null);
+			return new_struct;
+		});
 		
-		unrealTypes.GetBuiltInOrCreate("TWeakObjectPtr", 0x8);
-		unrealTypes.GetBuiltInOrCreate("TLazyObjectPtr", 0x1c);
-		unrealTypes.GetBuiltInOrCreate("TSoftObjectPtr", 0x28);
-		unrealTypes.GetBuiltInOrCreate("TScriptInterface", 0x10);
+		if (GVersion == UnrealVersion.UE_4_27) {
+			unrealTypes.GetBuiltInOrCreate("TSharedRef<ITextData, 1>", name -> {
+				TypedefDataType typedef = new TypedefDataType(UserTypes, name, utility.GetDataType("TSharedRef<void, 1>")); 
+				currentProgram.getDataTypeManager().addDataType(typedef, null);
+				return typedef;
+			});
+		} else {
+			unrealTypes.GetBuiltInOrCreate("TRefCountPtr<ITextData>", name -> {
+				StructureDataType new_struct = new StructureDataType(BuiltInTypes, name, 8);
+				utility.AddToStruct(new_struct, "Reference", 0, utility.GetDataType("void*"));
+				currentProgram.getDataTypeManager().addDataType(new_struct, null);
+				return new_struct;
+			});
+		}
+		
+		unrealTypes.GetBuiltInOrCreate("FText", name -> {
+			StructureDataType new_struct = new StructureDataType(BuiltInTypes, name, GVersion == UnrealVersion.UE_4_27 ? 24 : 16);
+			if (GVersion == UnrealVersion.UE_4_27) {
+				utility.AddToStruct(new_struct, "TextData", 0, utility.GetDataType("TSharedRef<ITextData, 1>"));
+			} else {
+				utility.AddToStruct(new_struct, "TextData", 0, utility.GetDataType("TRefCountPtr<ITextData>"));
+			}
+			utility.AddToStruct(new_struct, "TextData", GVersion == UnrealVersion.UE_4_27 ? 16 : 8, utility.GetDataType("uint"));
+			currentProgram.getDataTypeManager().addDataType(new_struct, null);
+			return new_struct;
+		});
+		
+		unrealTypes.GetBuiltInOrCreate("FWeakObjectPtr", name -> {
+			StructureDataType new_struct = new StructureDataType(BuiltInTypes, name, 8);
+			utility.AddToStruct(new_struct, "ObjectIndex", 0, utility.GetDataType("int"));
+			utility.AddToStruct(new_struct, "ObjectSerialNumber", 4, utility.GetDataType("int"));
+			currentProgram.getDataTypeManager().addDataType(new_struct, null);
+			return new_struct;
+		});
+		
+		unrealTypes.GetBuiltInOrCreate("TWeakObjectPtr<void, FWeakObjectPtr>", name -> {
+			StructureDataType new_struct = new StructureDataType(BuiltInTypes, name, 8);
+			utility.AddToStruct(new_struct, "Value", 0, utility.GetDataType("FWeakObjectPtr"));
+			currentProgram.getDataTypeManager().addDataType(new_struct, null);
+			return new_struct;
+		});
+		
+		unrealTypes.GetBuiltInOrCreate("FWeakObjectPtr", name -> {
+			StructureDataType new_struct = new StructureDataType(BuiltInTypes, name, 8);
+			utility.AddToStruct(new_struct, "ObjectIndex", 0, utility.GetDataType("int"));
+			utility.AddToStruct(new_struct, "ObjectSerialNumber", 4, utility.GetDataType("int"));
+			currentProgram.getDataTypeManager().addDataType(new_struct, null);
+			return new_struct;
+		});
+		
+		if (GVersion != UnrealVersion.UE_4_27) {
+			unrealTypes.GetBuiltInOrCreate("FTopLevelAssetPath", name -> {
+				StructureDataType new_struct = new StructureDataType(BuiltInTypes, name, 0x10);
+				utility.AddToStruct(new_struct, "PackageName", 0, utility.GetDataType("FName"));
+				utility.AddToStruct(new_struct, "AssetName", 8, utility.GetDataType("FName"));
+				currentProgram.getDataTypeManager().addDataType(new_struct, null);
+				return new_struct;
+			});
+		}
+		
+		unrealTypes.GetBuiltInOrCreate("FSoftObjectPath", name -> {
+			StructureDataType new_struct = new StructureDataType(BuiltInTypes, name, GVersion == UnrealVersion.UE_4_27 ? 24 : 32);
+			if (GVersion == UnrealVersion.UE_4_27) {
+				utility.AddToStruct(new_struct, "AssetPathName", 0, utility.GetDataType("FName"));
+			} else {
+				utility.AddToStruct(new_struct, "AssetPath", 0, utility.GetDataType("FTopLevelAssetPath"));
+			}
+			utility.AddToStruct(new_struct, "SubPathString", GVersion == UnrealVersion.UE_4_27 ? 8 : 16, utility.GetDataType("FString"));
+			currentProgram.getDataTypeManager().addDataType(new_struct, null);
+			return new_struct;
+		});
+		
+		unrealTypes.GetBuiltInOrCreate("TPersistentObjectPtr<FSoftObjectPath>", name -> {
+			StructureDataType new_struct = new StructureDataType(BuiltInTypes, name, 0x28);
+			utility.AddToStruct(new_struct, "WeakPtr", 0, utility.GetDataType("FWeakObjectPtr"));
+			if (GVersion == UnrealVersion.UE_4_27) {
+				utility.AddToStruct(new_struct, "TagAtLastTest", 8, utility.GetDataType("int"));	
+			}
+			utility.AddToStruct(new_struct, "ObjectID", GVersion == UnrealVersion.UE_4_27 ? 16 : 8, utility.GetDataType("FSoftObjectPath"));
+			currentProgram.getDataTypeManager().addDataType(new_struct, null);
+			return new_struct;
+		});
+		
+		unrealTypes.GetBuiltInOrCreate("TLazyObjectPtr", 0x1c); // ???
+		
+		unrealTypes.GetBuiltInOrCreate("FSoftObjectPtr", name -> {
+			StructureDataType new_struct = new StructureDataType(BuiltInTypes, name, 0x28);
+			utility.AddToStruct(new_struct, "Value", 0, utility.GetDataType("TPersistentObjectPtr<FSoftObjectPath>"));
+			currentProgram.getDataTypeManager().addDataType(new_struct, null);
+			return new_struct;
+		});
+		
+		unrealTypes.GetBuiltInOrCreate("TSoftObjectPtr<void>", name -> {
+			StructureDataType new_struct = new StructureDataType(BuiltInTypes, name, 0x28);
+			utility.AddToStruct(new_struct, "Value", 0, utility.GetDataType("FSoftObjectPtr"));
+			currentProgram.getDataTypeManager().addDataType(new_struct, null);
+			return new_struct;
+		});
+		unrealTypes.GetBuiltInOrCreate("TScriptInterface", 0x10); // ???
 		unrealTypes.GetBuiltInOrCreate("TSubClassOf", 0x8);
 		
 		gson = new GsonBuilder()
@@ -1006,12 +1472,29 @@ public class UnrealGen extends GhidraScript {
 				.create();
 	}
 	
+	private static UnrealVersion GVersion;
+	private static Map<String, UnrealVersion> UnrealNames = Map.ofEntries(
+			Map.entry("UE 4.27", UnrealVersion.UE_4_27),
+			Map.entry("UE 5.4", UnrealVersion.UE_5_4)
+	);
+	
+	private enum UnrealVersion {
+		UE_4_27,
+		UE_5_4
+	}
+	
 	@Override
 	public void run() throws Exception {
-		File json_export = askFile("Get Unreal Data JSON", "Ok");
+		GVersion = UnrealNames.get(askChoice(
+				"Version Selector", "Unreal Version", 
+				new ArrayList<>(UnrealNames.keySet()), 
+				UnrealNames.keySet().toArray()[0])
+		);
+		File json_export = askFile("Get Unreal Data JSON", "OK");
 		InitializeGlobals(json_export.getName());
 		BufferedReader file_read = new BufferedReader(new FileReader(json_export));
 		JsonReader json_read = gson.newJsonReader(file_read);
 		UnrealExport imported = gson.fromJson(json_read, UnrealExport.class);
 	}
 }
+

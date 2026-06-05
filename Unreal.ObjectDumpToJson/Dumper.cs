@@ -1,6 +1,7 @@
 ﻿using System.Diagnostics;
 using System.Runtime.InteropServices;
 using System.Text.Json;
+using System.Text.Json.Serialization.Metadata;
 using p3rpc.commonmodutils;
 using Reloaded.Mod.Interfaces;
 using RyoTune.Reloaded;
@@ -134,6 +135,7 @@ namespace Unreal.ObjectDumpToJson
             var asEnum = _context._toolkitFactory.CreateFByteProperty(property.Ptr).Enum;
             return asEnum != null && asEnum.Ptr != nint.Zero
                 ? CreateEnumProperty(asEnum)
+                // : new UnrealFieldType("byte");
                 : new UnrealFieldType(property.ClassPrivate.Name);
         }
 
@@ -176,8 +178,8 @@ namespace Unreal.ObjectDumpToJson
         
         private UnrealFieldArrayType CreateSetPropertyType(IFProperty property)
         {
-            var Array = _context._toolkitFactory.CreateFSetProperty(property.Ptr);
-            return new UnrealFieldArrayType(property.ClassPrivate.Name, GetField(Array.ElementProp));
+            var Set = _context._toolkitFactory.CreateFSetProperty(property.Ptr);
+            return new UnrealFieldArrayType(property.ClassPrivate.Name, GetField(Set.ElementProp));
         }
         
         private UnrealFieldMapType CreateMapPropertyType(IFProperty property)
@@ -186,10 +188,16 @@ namespace Unreal.ObjectDumpToJson
             return new UnrealFieldMapType(property.ClassPrivate.Name, GetField(Map.KeyProp), GetField(Map.ValueProp));
         }
         
-        private UnrealFieldType CreateDelegatePropertyType(IFProperty property)
+        private UnrealFieldDelegateType CreateDelegatePropertyType(IFProperty property)
         {
-            // TODO: Delegate
-            return new UnrealFieldType(property.ClassPrivate.Name);
+            var Delegate = _context._toolkitFactory.CreateFDelegateProperty(property.Ptr);
+            return new UnrealFieldDelegateType(property.ClassPrivate.Name, ExportFunction(Delegate.Function));
+        }
+
+        private UnrealFieldOptionalType CreateOptionalPropertyType(IFProperty property)
+        {
+            var Optional = _context._toolkitFactory.CreateFOptionalProperty(property.Ptr);
+            return new UnrealFieldOptionalType(property.ClassPrivate.Name, GetField(Optional.ValueProperty));
         }
         
         private UnrealField GetField(IFProperty field)
@@ -198,7 +206,7 @@ namespace Unreal.ObjectDumpToJson
             var typeData = FieldType.Name switch
             {
                 "BoolProperty" => CreateBoolPropertyType(field),
-                "ByteProperty" => CreateBytePropertyType(field),
+                "ByteProperty" or "Int8Property" => CreateBytePropertyType(field),
                 "EnumProperty" => CreateEnumPropertyType(field),
                 "StructProperty" => CreateStructPropertyType(field), 
                 "ObjectProperty" or // FObjectPropertyBase<UObject*>
@@ -215,6 +223,7 @@ namespace Unreal.ObjectDumpToJson
                     "MulticastDelegateProperty" or
                     "MulticastInlineDelegateProperty" or // DECLARE_[DYNAMIC]_MULTICAST_DELEGATE(this, ...)
                     "MulticastSparseDelegateProperty" => CreateDelegatePropertyType(field), // DECLARE_[DYNAMIC]_MULTICAST_SPARSE_DELEGATE(this, ...)
+                "OptionalProperty" => CreateOptionalPropertyType(field), // TOptional<Type>
                 var name => new UnrealFieldType(name)
             };
             return new UnrealField(field.NamePrivate, typeData, field.Offset_Internal, field.ElementSize, field.PropertyFlags);
