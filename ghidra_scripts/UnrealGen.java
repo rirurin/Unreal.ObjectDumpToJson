@@ -274,7 +274,10 @@ public class UnrealGen extends GhidraScript {
 			JsonArray fields_json = obj.get("Fields").getAsJsonArray();
 			List<UnrealField> fields = new LinkedList<>();
 			for (int i = 0; i < fields_json.size(); i++) {
-				fields.add(gson.fromJson(fields_json.get(i), UnrealField.class)); // Field data TODO
+				var CurrentField = gson.fromJson(fields_json.get(i), UnrealField.class);
+				if (CurrentField != null) {
+					fields.add(CurrentField); // Field data TODO	
+				}
 			}
 			return fields;
 		}
@@ -508,7 +511,9 @@ public class UnrealGen extends GhidraScript {
 	}
 	
 	public UnrealField UnrealFieldFactory(JsonObject field, JsonObject type) {
-		 String type_name = type.get("Name").getAsString();
+		 var typeNameObject = type.get("Name");
+		 if (typeNameObject == null) return null;
+		 String type_name = typeNameObject.getAsString();
 		 //println(type_name);
 		 UnrealField new_field;
 		 switch (type_name) {
@@ -536,13 +541,28 @@ public class UnrealGen extends GhidraScript {
 		 	case "StrProperty": new_field = new UnrealStringField(); break; // FString, size 0x10
 		 	case "TextProperty": new_field = new UnrealTextField(); break; // FText, size 0x18
 		 	// uses Unreal user defined types (e.g UObject*)
-		 	case "StructProperty": new_field = new UnrealStructField(type.get("TypeName").getAsString()); break; // FStruct
-		 	case "ObjectProperty": new_field = new UnrealObjectField(type.get("TypeName").getAsString()); break; // UObject*
+		 	case "StructProperty": // FStruct
+		 		var StructType = type.get("TypeName");
+		 		// perform null checking:
+	            // UValidationHelpersFunctionLibrary_C::CheckIsValid - Clair Obscur: Expedition 33
+	            // The object parameter ValidatorContext has no type
+		 		if (StructType == null) return null;
+		 		new_field = new UnrealStructField(StructType.getAsString()); 
+		 		break; 
+		 	case "ObjectProperty": // UObject* 
+		 		var ObjectType = type.get("TypeName");
+		 		if (ObjectType == null) return null;
+		 		new_field = new UnrealObjectField(ObjectType.getAsString()); 
+		 		break;
 		 	case "WeakObjectProperty": new_field = new UnrealWeakObjectField(type.get("TypeName").getAsString()); break; // TWeakObjectPtr<UObject>, size 0x8
 		 	case "LazyObjectProperty": new_field = new UnrealLazyObjectField(type.get("TypeName").getAsString()); break; // TLazyObjectPtr<UObject>, size 0x1c
 		 	case "SoftObjectProperty": new_field = new UnrealSoftObjectField(type.get("TypeName").getAsString()); break; // TSoftObjectPtr<UObject>, size 0x28
 		 	case "InterfaceProperty": new_field = new UnrealInterfaceField(type.get("TypeName").getAsString()); break; // TScriptInterface<IInterfaceName>, size 0x10
-		 	case "ClassProperty": new_field = new UnrealClassField(type.get("TypeName").getAsString()); break; // TSubclassOf<UClassName>, size 0x8
+		 	case "ClassProperty": // TSubclassOf<UClassName>, size 0x8
+		 		var ClassType = type.get("TypeName");
+		 		if (ClassType == null) return null;
+		 		new_field = new UnrealClassField(ClassType.getAsString()); 
+		 		break;
 		 	case "SoftClassProperty": new_field = new UnrealSoftClassField(type.get("TypeName").getAsString(), field.get("Size").getAsInt());
 		 	case "EnumProperty": new_field = new UnrealInt8Field(); break;
 		 	// template types (e.g TArray<AActor*>)

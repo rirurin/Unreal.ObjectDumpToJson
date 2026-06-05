@@ -16,4 +16,5 @@ In Ghidra, run the script "UnrealGen.java", select the Unreal version that the g
 | - | - |
 | Persona 3 Reload | 4.27 |
 | Shin Megami Tensei V: Vengenance | 4.27 |
-| Clair Obscur: Expedition 33 (WIP) | 5.4 |
+| Rune Factory: Guardians of Azuma | 5.4 |
+| Clair Obscur: Expedition 33 | 5.4 |
