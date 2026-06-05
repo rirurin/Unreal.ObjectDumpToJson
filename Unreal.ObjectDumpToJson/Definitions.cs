@@ -31,105 +31,28 @@ namespace Unreal.ObjectDumpToJson
         public virtual string GetTypeName() => Name;
     }
     
-    public class UnrealFieldArrayType : UnrealFieldType
+    public class UnrealFieldArrayType(string name, UnrealField inner) : UnrealFieldType(name)
     {
-        [JsonIgnore]
-        private UnrealField _Inner;
-        public string InnerTypeName { get; private set; }
-        [JsonIgnore]
-        public UnrealField Inner
-        {
-            get => _Inner;
-            set
-            {
-                _Inner = value;
-                InnerTypeName = Inner.Type.GetTypeName();
-            }
-        }
-        public UnrealFieldArrayType(string name, UnrealField inner) : base(name)
-        {
-            Inner = inner;
-        }
+        public string InnerTypeName { get; private set; } = inner.Type.GetTypeName();
     }
     
-    public class UnrealFieldMapType : UnrealFieldType
+    public class UnrealFieldMapType(string name, UnrealField key, UnrealField value) : UnrealFieldType(name)
     {
-        // KEY
-        [JsonIgnore]
-        private UnrealField _Key;
-        public string KeyName { get; private set; }
-        [JsonIgnore]
-        public UnrealField Key
-        {
-            get => _Key;
-            set
-            {
-                _Key = value;
-                KeyName = Key.Type.GetTypeName();
-            }
-        }
-        // VALUE
-        [JsonIgnore]
-        private UnrealField _Value;
-        public string ValueName { get; private set; }
-        [JsonIgnore]
-        public UnrealField Value
-        {
-            get => _Value;
-            set
-            {
-                _Value = value;
-                ValueName = Value.Type.GetTypeName();
-            }
-        }
-        public UnrealFieldMapType(string name, UnrealField key, UnrealField value) : base(name)
-        {
-            Key = key;
-            Value = value;
-        }
+        public string KeyName { get; private set; } = key.Type.GetTypeName();
+        public string ValueName { get; private set; } = value.Type.GetTypeName();
     }
     
-    public class UnrealFieldStructType : UnrealFieldType
+    public class UnrealFieldStructType(string name, UnrealStruct type) : UnrealFieldType(name)
     {
-        [JsonIgnore]
-        private UnrealStruct _Type;
-        public string TypeName { get; private set; }
-        [JsonIgnore]
-        public UnrealStruct Type
-        {
-            get => _Type;
-            set
-            {
-                _Type = value;
-                TypeName = _Type.Name;
-            }
-        }
-        public UnrealFieldStructType(string name, UnrealStruct type) : base(name)
-        {
-            Type = type;
-        }
+        public string TypeName { get; private set; } = type.Name;
+
         public override string GetTypeName() => TypeName;
     }
     
-    public class UnrealFieldClassType : UnrealFieldType
+    public class UnrealFieldClassType(string name, UnrealClass type) : UnrealFieldType(name)
     {
-        [JsonIgnore]
-        private UnrealClass _Type;
-        public string TypeName { get; private set; }
-        [JsonIgnore]
-        public UnrealClass Type
-        {
-            get => _Type;
-            set
-            {
-                _Type = value;
-                TypeName = _Type.Name;
-            }
-        }
-        public UnrealFieldClassType(string name, UnrealClass type) : base(name)
-        {
-            Type = type;
-        }
+        public string TypeName { get; private set; } = type.Name;
+
         public override string GetTypeName() => TypeName;
     }
     
@@ -141,26 +64,10 @@ namespace Unreal.ObjectDumpToJson
         public int ByteMask { get; set; } = byteMask;
         public int FieldMask { get; set; } = fieldMask;
     }
-    public class UnrealFieldEnumType : UnrealFieldType
+    public class UnrealFieldEnumType(string name, UnrealEnum uEnum) : UnrealFieldType(name)
     {
+        public string EnumName { get; private set; } = uEnum.Name;
 
-        [JsonIgnore]
-        private UnrealEnum _Enum;
-        public string EnumName { get; private set; }
-        [JsonIgnore]
-        public UnrealEnum Enum
-        {
-            get => _Enum;
-            set
-            {
-                _Enum = value;
-                EnumName = _Enum.Name;
-            }
-        }
-        public UnrealFieldEnumType(string name, UnrealEnum u_enum) : base(name)
-        {
-            Enum = u_enum;
-        }
         public override string GetTypeName() => EnumName;
     }
     

@@ -1,6 +1,6 @@
 {
   "ModId": "Unreal.ObjectDumpToJson",
-  "ModName": "Unreal Object Dumper [BASE]",
+  "ModName": "Unreal Object Dumper",
   "ModAuthor": "Rirurin",
   "ModVersion": "2.0.0",
   "ModDescription": "A tool to dump Unreal Engine's runtime reflection information into a JSON that can be imported into Ghidra",

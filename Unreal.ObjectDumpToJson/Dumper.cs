@@ -164,8 +164,14 @@ namespace Unreal.ObjectDumpToJson
         
         private UnrealFieldArrayType CreateArrayPropertyType(IFProperty property)
         {
-            var Map = _context._toolkitFactory.CreateFArrayProperty(property.Ptr);
-            return new UnrealFieldArrayType(property.ClassPrivate.Name, GetField(Map.Inner));
+            var Array = _context._toolkitFactory.CreateFArrayProperty(property.Ptr);
+            return new UnrealFieldArrayType(property.ClassPrivate.Name, GetField(Array.Inner));
+        }
+        
+        private UnrealFieldArrayType CreateSetPropertyType(IFProperty property)
+        {
+            var Array = _context._toolkitFactory.CreateFSetProperty(property.Ptr);
+            return new UnrealFieldArrayType(property.ClassPrivate.Name, GetField(Array.ElementProp));
         }
         
         private UnrealFieldMapType CreateMapPropertyType(IFProperty property)
@@ -182,7 +188,6 @@ namespace Unreal.ObjectDumpToJson
         
         private UnrealField GetField(IFProperty field)
         {
-            // Log.Information($"\tField {field.NamePrivate}");
             var FieldType = field.ClassPrivate; // get property type info
             var typeData = FieldType.Name switch
             {
@@ -197,8 +202,8 @@ namespace Unreal.ObjectDumpToJson
                     "InterfaceProperty" or // TScriptInterface<IInterfaceName>
                     "ClassProperty" or // TSubclassOf<UObject>
                     "SoftClassProperty" => CreateObjectPropertyType(field), // TSoftClassPtr<UObject>
-                "ArrayProperty" or // TArray<Type>
-                    "SetProperty" => CreateArrayPropertyType(field), // TSet<Type>
+                "ArrayProperty" => CreateArrayPropertyType(field), // TArray<Type>
+                "SetProperty" => CreateSetPropertyType(field), // TSet<Type>
                 "MapProperty" => CreateMapPropertyType(field), // TMap<KeyType, ValueType>
                 "DelegateProperty" or // DECLARE_[DYNAMIC]_DELEGATE_XParams(this, ...)
                     "MulticastDelegateProperty" or
@@ -211,10 +216,12 @@ namespace Unreal.ObjectDumpToJson
 
         private UnrealFunction ExportFunction(IUFunction func)
         {
+            // Log.Information($"ExportFunction: {func.NamePrivate.ToString()}");
             UnrealField? Return = null;
             List<UnrealField> FnParams = [];
             foreach (var Field in func.ChildProperties)
             {
+                // Log.Information($"\t{Field.ClassPrivate.Name} {Field.NamePrivate}");
                 var Property = _context._toolkitFactory.CreateFProperty(Field.Ptr);
                 var FieldCnv = GetField(Property);
                 if ((Property.PropertyFlags & EPropertyFlags.CPF_ReturnParm) != 0) Return = FieldCnv;
