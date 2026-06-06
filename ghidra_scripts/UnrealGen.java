@@ -78,6 +78,7 @@ public class UnrealGen extends GhidraScript {
 	public Utilities utility;
 	public UnrealTypeFactory unrealTypes;
 	
+	private static Pattern DataTypeMatcher = Pattern.compile("\\[\\d+\\]|\\*");
 	private HashMap<String, UnrealClass> LoadedClasses;
 	private HashMap<String, UnrealStruct> LoadedStructs;
 	private HashMap<String, UnrealEnum> LoadedEnums;
@@ -141,9 +142,8 @@ public class UnrealGen extends GhidraScript {
 		private DataType GetDataType(String dt) {
 			DataType res;
 			
-			Pattern p = Pattern.compile("\\[\\d+\\]|\\*");
-			Matcher m = p.matcher(dt);
-			String dtPure = p.split(dt)[0]; // base type name
+			Matcher m = DataTypeMatcher.matcher(dt);
+			String dtPure = DataTypeMatcher.split(dt)[0]; // base type name
 			Queue<String> modifiers = new ArrayDeque<>();
 			modifiers.add(dtPure);
 			while (m.find()) {
