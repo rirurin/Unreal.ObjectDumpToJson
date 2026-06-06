@@ -14,6 +14,8 @@ namespace Unreal.ObjectDumpToJson
     public unsafe class Dumper(DumperContext context, Dictionary<string, ModuleBase<DumperContext>> modules)
         : ModuleBase<DumperContext>(context, modules)
     {
+
+        private Dictionary<string, IUClass> ReflectedClasses = new();
         private UnrealDataContainer ToExport = new();
 
         public override void Register() {}
@@ -23,8 +25,9 @@ namespace Unreal.ObjectDumpToJson
             base.OnConfigUpdated(newConfig);
             var objects = _context._toolkitObjects.GUObjectArray;
             Log.Debug($"Found {objects.NumElements} objects in GUObjectArray");
-            var filePath = Path.Combine(_context._modLocation, "Dumps", $"{_context._programName}.json");
-                
+            var filePath = Path.Combine(_context._modLocation, "Dumps", _context._programName, "ReflectionInfo.json");
+            
+            // Dump types in Unreal's type reflection system
             var sw = new Stopwatch();
             sw.Start();
             for (var i = 0; i < objects.NumElements; i++)
@@ -43,6 +46,27 @@ namespace Unreal.ObjectDumpToJson
                              Dumped {ToExport.Classes.Count} classes, {ToExport.Structs.Count} structs and {ToExport.Enums.Count} enums
                              Completed in {sw.ElapsedMilliseconds.ToString()} ms, saved to {filePath}
                              """);
+            // Fetch offsets for non-zero VTables
+            var offsetsInput = Path.Combine(_context._modLocation, "Dumps", _context._programName, "Offsets.json");
+            var offsetsOutput = Path.Combine(_context._modLocation, "Dumps", _context._programName, "OffsetAddresses.json");
+            if (Path.Exists(offsetsInput))
+            {
+                Log.Information("Found Offsets.json");
+                using var inFile = new StreamReader(offsetsInput);
+                using var outFile = new StreamWriter(offsetsOutput);
+                var offsets = JsonSerializer.Deserialize<List<ClassOffsets>>(inFile.ReadToEnd());
+                List<ClassOffsetLocations> locations = [];
+                foreach (var offsetClass in offsets!)
+                {
+                    if (ReflectedClasses.TryGetValue(offsetClass.Name[1..], out var uClass))
+                    {
+                        locations.Add(new(offsetClass.Name, offsetClass.Offsets.Select(x => 
+                            new MemoryAddress(*(nint*)(uClass.ClassDefaultObject!.Ptr + x))).ToList()));
+                    }
+                }
+                outFile.WriteLine(JsonSerializer.Serialize(locations));
+                Log.Information($"Added additional VTable information from {locations.Count} classes into {offsetsOutput}");
+            }
             ToExport.Clear();
         }
         
@@ -64,6 +88,7 @@ namespace Unreal.ObjectDumpToJson
             if (vtable != nint.Zero) newClass.NativeVtable = new(vtable);
             if (ctor != nint.Zero) newClass.Constructor = new(ctor);
             ToExport.Classes.Add(type.NamePrivate.ToString(), newClass);
+            ReflectedClasses.Add(type.NamePrivate.ToString(), type);
             var super = type.SuperStruct;
             if (super != null)
             {

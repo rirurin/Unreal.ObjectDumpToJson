@@ -11,8 +11,10 @@ import java.io.FileWriter;
 import java.lang.reflect.Type;
 import java.nio.file.Paths;
 import java.util.ArrayDeque;
+import java.util.HashMap;
 import java.util.LinkedList;
 import java.util.Queue;
+import java.util.Set;
 import java.util.function.Supplier;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
@@ -59,6 +61,8 @@ public class UnrealExportVTables extends GhidraScript {
 	private static SymbolTable GSymbolTable;
 	private static Listing GListing;
 	private static Memory GMemory;
+	private static Address CodeStart;
+	private static Address CodeEnd;
 	
 	private static Pattern DataTypeMatcher = Pattern.compile("\\[\\d+\\]|\\*");
 	private static Pattern DeletingDestructorAdjustor = Pattern.compile("\\{\\d+");
@@ -215,7 +219,7 @@ public class UnrealExportVTables extends GhidraScript {
 			var out = GListing.getFunctionAt(address);
 			if (out == null) {
 				var instruction = GListing.getInstructionAt(address);
-				if (instruction == null) if (out == null) throw new NullPointerException("Function does not exist at " + address.toString());
+				if (instruction == null) throw new NullPointerException("Function does not exist at " + address.toString());
 				out = createFunction(address, null);
 			}
 			return out;
@@ -226,7 +230,7 @@ public class UnrealExportVTables extends GhidraScript {
 		}
 		
 		private boolean inExecutable(Address addr) {
-			return addr.compareTo(GMemory.getMinAddress()) >= 0 && addr.compareTo(GMemory.getMaxAddress()) < 0;	
+			return addr.compareTo(CodeStart) >= 0 && addr.compareTo(CodeEnd) < 0;	
 		}
 		
 	}
@@ -245,6 +249,19 @@ public class UnrealExportVTables extends GhidraScript {
 		public String ToString() {
 			return val.toString();
 		}
+	}
+	
+	public class FieldedData {
+		private HashMap<String, Data> NamesToFields;
+		public FieldedData(Data TargetData) {
+			NamesToFields = new HashMap<>();
+			for (int i = 0; i < TargetData.getNumComponents(); i++) {
+				Data Field = TargetData.getComponent(i);
+				NamesToFields.put(Field.getFieldName(), Field);
+			}
+		}
+		public Set<String> FieldNames() { return NamesToFields.keySet(); }
+		public Data Get(String name) { return NamesToFields.get(name); }
 	}
 	
 	public class FunctionParameter {
@@ -371,9 +388,25 @@ public class UnrealExportVTables extends GhidraScript {
 		}	
 	}
 	
-	private FunctionPointer fromData(Data pFunc, Ref<Integer> pOffset) {
-		if (pFunc == null || pFunc.getValue() == null) {
-			return null;
+	private FunctionPointer fromData(Data pFunc, Address addr, Ref<Integer> pOffset, Ref<Boolean> halt) 
+			throws MemoryAccessException, CancelledException, CodeUnitInsertionException {
+		if (addr != null) {
+			// Use addr to resolve address if there's no defined data
+			if (pFunc == null || !pFunc.isDefined()) {
+				var rawAddr = toAddr(Long.toHexString(GMemory.getLong(addr)));
+				if (utility.inExecutable(rawAddr)) {
+					clearListing(addr, addr.add(7));
+					pFunc = GListing.createData(addr, new PointerDataType());
+				} else {
+					halt.set(true);
+					return null;
+				}
+			}
+			// Have we ended up inside of a parent type? (e.g FuncInfo after FWmfMediaModule)
+			else if (pFunc.getNumComponents() > 0) {
+				halt.set(true);
+				return null;
+			}
 		}
 		var deref = toAddr(pFunc.getValue().toString());
 		if (deref == null || !utility.inExecutable(deref)) {
@@ -410,9 +443,6 @@ public class UnrealExportVTables extends GhidraScript {
 		
 		utility = new Utilities();
 		
-		//UserTypes = new CategoryPath("/" + UserTypeName.split("\\.")[0]); // cut off file extension
-		BuiltInTypes = new CategoryPath("/Unreal");
-		
 		gson = new GsonBuilder()
 				.registerTypeAdapter(FunctionParameter.class, new FunctionParameterSerializer())
 				.registerTypeAdapter(FunctionPointer.class, new FunctionPointerSerializer())
@@ -420,21 +450,35 @@ public class UnrealExportVTables extends GhidraScript {
 				.registerTypeAdapter(ClassDefinition.class, new ClassDefinitionSerializer())
 				.create();
 		
+		// Get actual code range
+		var dosHeader = new FieldedData(GListing.getDataAt(GMemory.getMinAddress()));
+		var ntHeader = new FieldedData(GListing.getDataAt(
+				GMemory.getMinAddress().add(Long.parseLong(dosHeader.Get("e_lfanew").getValue().toString().substring(2), 16))));
+		var optionalHeader = new FieldedData(ntHeader.Get("OptionalHeader"));
+		
+		CodeStart = toAddr(optionalHeader.Get("BaseOfCode").getValue().toString());
+		CodeEnd = CodeStart.add(Long.parseLong(optionalHeader.Get("SizeOfCode").getValue().toString().substring(2), 16));
+		
 		var filePath = askDirectory("Set folder to output files to", "OK");
+		UserTypes = new CategoryPath("/" + filePath.getName());
+		BuiltInTypes = new CategoryPath("/Unreal");
+		
 		var classesOut = new LinkedList<ClassDefinition>();
-
-		GSymbolTable.getClassNamespaces().forEachRemaining(classNamespace -> {
+		var classNamespaces = GSymbolTable.getClassNamespaces();
+		while (classNamespaces.hasNext()) {
+			var classNamespace = classNamespaces.next();
 			// Skip certain naming conventions that we know aren't part of the type reflection system
 			if (!classNamespace.getName().startsWith("U") &&
 					!classNamespace.getName().startsWith("A") && 
 					!classNamespace.getName().startsWith("F")) {
-				return;
+				continue;
 			}
 			var vtables = new LinkedList<ClassVTable>();
 			var classSymbols = GSymbolTable.getSymbols(classNamespace);
 			var hasVTableSymbol = new Ref<Boolean>(false);
-			classSymbols.forEach(symbol -> {
-				if (!symbol.getName().startsWith("`vftable'")) return;
+			while (classSymbols.hasNext()) {
+				var symbol = classSymbols.next();
+				if (!symbol.getName().startsWith("`vftable'")) continue;
 				if (!hasVTableSymbol.get()) {
 					println(classNamespace.getName());
 				}
@@ -445,25 +489,26 @@ public class UnrealExportVTables extends GhidraScript {
 				var currAddr = startAddr;
 				var funcsOut = new LinkedList<FunctionPointer>();
 				var tableOffset = new Ref<Integer>(-1);
+				var halt = new Ref<Boolean>(false);
 				if (startData.getNumComponents() > 0) {
 					for (int i = 0; i < startData.getNumComponents(); i++) {
-						funcsOut.add(fromData(startData.getComponent(i), tableOffset));
+						funcsOut.add(fromData(startData.getComponent(i), null, tableOffset, halt));
 					}
 				} else {
 					do {
 						var pFunc = GListing.getDataAt(currAddr);
-						funcsOut.add(fromData(pFunc, tableOffset));
+						funcsOut.add(fromData(pFunc, currAddr, tableOffset, halt));
 						currAddr = currAddr.add(8);
-					} while (GSymbolTable.getSymbols(currAddr).length == 0);
+					} while (GSymbolTable.getSymbols(currAddr).length == 0 && !halt.get());
 				}
 				if (tableOffset.get() != -1) {
 					vtables.add(new ClassVTable(tableOffset.get(), funcsOut));
 				}
-			});
+			}
 			if (!vtables.isEmpty()) {
 				classesOut.add(new ClassDefinition(classNamespace.getName(), vtables));	
-			}
-		});
+			}	
+		}
 		
 		try (var fileWriter = new BufferedWriter(new FileWriter(new File(
 				Paths.get(filePath.getAbsolutePath(), "VTables.json").toString())))) {

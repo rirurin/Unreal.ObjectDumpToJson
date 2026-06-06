@@ -1299,7 +1299,7 @@ public class UnrealGen extends GhidraScript {
 	}
 	
 	private void InitializeGlobals(String UserTypeName) {
-		UserTypes = new CategoryPath("/" + UserTypeName.split("\\.")[0]); // cut off file extension
+		UserTypes = new CategoryPath("/" + UserTypeName);
 		BuiltInTypes = new CategoryPath("/Unreal");
 		
 		makeCategoryIfNeeded(UserTypes);
@@ -1510,11 +1510,12 @@ public class UnrealGen extends GhidraScript {
 				new ArrayList<>(UnrealNames.keySet()), 
 				UnrealNames.keySet().toArray()[0])
 		);
-		File json_export = askFile("Get Unreal Data JSON", "OK");
-		InitializeGlobals(json_export.getName());
-		BufferedReader file_read = new BufferedReader(new FileReader(json_export));
-		JsonReader json_read = gson.newJsonReader(file_read);
-		UnrealExport imported = gson.fromJson(json_read, UnrealExport.class);
+		File jsonExport = askFile("Get ReflectionInfo.json from the Dumps folder", "OK");
+		InitializeGlobals((new File(jsonExport.getParent())).getName());
+		try (var fileRead = new BufferedReader(new FileReader(jsonExport))) {
+			JsonReader jsonRead = gson.newJsonReader(fileRead);	
+			UnrealExport imported = gson.fromJson(jsonRead, UnrealExport.class);
+		}
 	}
 }
 
